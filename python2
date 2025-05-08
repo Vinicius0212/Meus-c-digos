@@ -1,0 +1,741 @@
+import json
+import datetime
+import os
+from typing import List, Dict, Optional, Union
+from dataclasses import dataclass, asdict
+
+
+@dataclass
+class Livro:
+    id: str
+    titulo: str
+    autor: str
+    ano_publicacao: int
+    genero: str
+    disponivel: bool = True
+    reservado: bool = False
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'Livro':
+        return cls(**data)
+
+
+@dataclass
+class Usuario:
+    id: str
+    nome: str
+    email: str
+    telefone: str
+    ativo: bool = True
+    livros_emprestados: List[str] = None
+
+    def __post_init__(self):
+        if self.livros_emprestados is None:
+            self.livros_emprestados = []
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'Usuario':
+        return cls(**data)
+
+
+@dataclass
+class Emprestimo:
+    id: str
+    livro_id: str
+    usuario_id: str
+    data_emprestimo: str
+    data_devolucao_prevista: str
+    data_devolucao_real: Optional[str] = None
+    multa: float = 0.0
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'Emprestimo':
+        return cls(**data)
+
+
+class Biblioteca:
+    def __init__(self):
+        self.livros: Dict[str, Livro] = {}
+        self.usuarios: Dict[str, Usuario] = {}
+        self.emprestimos: Dict[str, Emprestimo] = {}
+        self.emprestimos_ativos: Dict[str, Emprestimo] = {}
+        self.carregar_dados()
+
+    # Métodos para Livros
+    def adicionar_livro(self, livro: Livro) -> None:
+        if livro.id in self.livros:
+            raise ValueError("Livro com este ID já existe")
+        self.livros[livro.id] = livro
+        self.salvar_dados()
+
+    def remover_livro(self, livro_id: str) -> None:
+        if livro_id not in self.livros:
+            raise ValueError("Livro não encontrado")
+        if not self.livros[livro_id].disponivel:
+            raise ValueError("Não é possível remover um livro emprestado")
+        del self.livros[livro_id]
+        self.salvar_dados()
+
+    def buscar_livro_por_id(self, livro_id: str) -> Optional[Livro]:
+        return self.livros.get(livro_id)
+
+    def buscar_livros_por_titulo(self, titulo: str) -> List[Livro]:
+        return [livro for livro in self.livros.values() if titulo.lower() in livro.titulo.lower()]
+
+    def buscar_livros_por_autor(self, autor: str) -> List[Livro]:
+        return [livro for livro in self.livros.values() if autor.lower() in livro.autor.lower()]
+
+    def buscar_livros_por_genero(self, genero: str) -> List[Livro]:
+        return [livro for livro in self.livros.values() if genero.lower() in livro.genero.lower()]
+
+    def listar_livros_disponiveis(self) -> List[Livro]:
+        return [livro for livro in self.livros.values() if livro.disponivel]
+
+    # Métodos para Usuários
+    def adicionar_usuario(self, usuario: Usuario) -> None:
+        if usuario.id in self.usuarios:
+            raise ValueError("Usuário com este ID já existe")
+        self.usuarios[usuario.id] = usuario
+        self.salvar_dados()
+
+    def remover_usuario(self, usuario_id: str) -> None:
+        if usuario_id not in self.usuarios:
+            raise ValueError("Usuário não encontrado")
+        if self.usuarios[usuario_id].livros_emprestados:
+            raise ValueError("Não é possível remover um usuário com livros emprestados")
+        del self.usuarios[usuario_id]
+        self.salvar_dados()
+
+    def buscar_usuario_por_id(self, usuario_id: str) -> Optional[Usuario]:
+        return self.usuarios.get(usuario_id)
+
+    def buscar_usuarios_por_nome(self, nome: str) -> List[Usuario]:
+        return [usuario for usuario in self.usuarios.values() if nome.lower() in usuario.nome.lower()]
+
+    def desativar_usuario(self, usuario_id: str) -> None:
+        usuario = self.buscar_usuario_por_id(usuario_id)
+        if not usuario:
+            raise ValueError("Usuário não encontrado")
+        usuario.ativo = False
+        self.salvar_dados()
+
+    def ativar_usuario(self, usuario_id: str) -> None:
+        usuario = self.buscar_usuario_por_id(usuario_id)
+        if not usuario:
+            raise ValueError("Usuário não encontrado")
+        usuario.ativo = True
+        self.salvar_dados()
+
+    # Métodos para Empréstimos
+    def realizar_emprestimo(self, livro_id: str, usuario_id: str) -> Emprestimo:
+        livro = self.buscar_livro_por_id(livro_id)
+        usuario = self.buscar_usuario_por_id(usuario_id)
+
+        if not livro or not usuario:
+            raise ValueError("Livro ou usuário não encontrado")
+        if not livro.disponivel:
+            raise ValueError("Livro não disponível para empréstimo")
+        if not usuario.ativo:
+            raise ValueError("Usuário inativo não pode pegar livros emprestados")
+        if len(usuario.livros_emprestados) >= 3:
+            raise ValueError("Usuário atingiu o limite máximo de empréstimos")
+
+        data_atual = datetime.date.today().isoformat()
+        data_devolucao = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
+
+        emprestimo = Emprestimo(
+            id=str(len(self.emprestimos) + 1),
+            livro_id=livro_id,
+            usuario_id=usuario_id,
+            data_emprestimo=data_atual,
+            data_devolucao_prevista=data_devolucao
+        )
+
+        self.emprestimos[emprestimo.id] = emprestimo
+        self.emprestimos_ativos[livro_id] = emprestimo
+        livro.disponivel = False
+        usuario.livros_emprestados.append(livro_id)
+        self.salvar_dados()
+
+        return emprestimo
+
+    def realizar_devolucao(self, livro_id: str) -> Emprestimo:
+        emprestimo = self.emprestimos_ativos.get(livro_id)
+        if not emprestimo:
+            raise ValueError("Este livro não está emprestado atualmente")
+
+        livro = self.buscar_livro_por_id(livro_id)
+        usuario = self.buscar_usuario_por_id(emprestimo.usuario_id)
+
+        data_atual = datetime.date.today().isoformat()
+        emprestimo.data_devolucao_real = data_atual
+
+        # Calcular multa se houver atraso
+        data_prevista = datetime.date.fromisoformat(emprestimo.data_devolucao_prevista)
+        data_real = datetime.date.fromisoformat(data_atual)
+        if data_real > data_prevista:
+            dias_atraso = (data_real - data_prevista).days
+            emprestimo.multa = dias_atraso * 2.0  # R$2 por dia de atraso
+
+        livro.disponivel = True
+        usuario.livros_emprestados.remove(livro_id)
+        del self.emprestimos_ativos[livro_id]
+        self.salvar_dados()
+
+        return emprestimo
+
+    def renovar_emprestimo(self, livro_id: str) -> Emprestimo:
+        emprestimo = self.emprestimos_ativos.get(livro_id)
+        if not emprestimo:
+            raise ValueError("Este livro não está emprestado atualmente")
+
+        data_prevista = datetime.date.fromisoformat(emprestimo.data_devolucao_prevista)
+        nova_data = data_prevista + datetime.timedelta(days=14)
+        emprestimo.data_devolucao_prevista = nova_data.isoformat()
+        self.salvar_dados()
+
+        return emprestimo
+
+    def listar_emprestimos_ativos(self) -> List[Emprestimo]:
+        return list(self.emprestimos_ativos.values())
+
+    def listar_historico_emprestimos(self) -> List[Emprestimo]:
+        return list(self.emprestimos.values())
+
+    def listar_emprestimos_por_usuario(self, usuario_id: str) -> List[Emprestimo]:
+        return [emp for emp in self.emprestimos.values() if emp.usuario_id == usuario_id]
+
+    # Métodos para Relatórios
+    def gerar_relatorio_livros_mais_emprestados(self, limite: int = 10) -> List[Dict]:
+        contagem = {}
+        for emp in self.emprestimos.values():
+            contagem[emp.livro_id] = contagem.get(emp.livro_id, 0) + 1
+
+        livros_ordenados = sorted(contagem.items(), key=lambda x: x[1], reverse=True)[:limite]
+        resultado = []
+        for livro_id, count in livros_ordenados:
+            livro = self.buscar_livro_por_id(livro_id)
+            resultado.append({
+                'livro': livro.titulo,
+                'autor': livro.autor,
+                'emprestimos': count
+            })
+        return resultado
+
+    def gerar_relatorio_usuarios_mais_ativos(self, limite: int = 10) -> List[Dict]:
+        contagem = {}
+        for emp in self.emprestimos.values():
+            contagem[emp.usuario_id] = contagem.get(emp.usuario_id, 0) + 1
+
+        usuarios_ordenados = sorted(contagem.items(), key=lambda x: x[1], reverse=True)[:limite]
+        resultado = []
+        for usuario_id, count in usuarios_ordenados:
+            usuario = self.buscar_usuario_por_id(usuario_id)
+            resultado.append({
+                'usuario': usuario.nome,
+                'email': usuario.email,
+                'emprestimos': count
+            })
+        return resultado
+
+    def gerar_relatorio_atrasos(self) -> Dict:
+        hoje = datetime.date.today()
+        atrasados = []
+        no_prazo = []
+
+        for emp in self.emprestimos_ativos.values():
+            data_prevista = datetime.date.fromisoformat(emp.data_devolucao_prevista)
+            if hoje > data_prevista:
+                atrasados.append(emp)
+            else:
+                no_prazo.append(emp)
+
+        return {
+            'total_emprestimos_ativos': len(self.emprestimos_ativos),
+            'atrasados': len(atrasados),
+            'no_prazo': len(no_prazo),
+            'percentual_atraso': (len(atrasados) / len(self.emprestimos_ativos)) * 100 if self.emprestimos_ativos else 0
+        }
+
+    # Persistência de dados
+    def salvar_dados(self) -> None:
+        dados = {
+            'livros': [livro.to_dict() for livro in self.livros.values()],
+            'usuarios': [usuario.to_dict() for usuario in self.usuarios.values()],
+            'emprestimos': [emprestimo.to_dict() for emprestimo in self.emprestimos.values()],
+            'emprestimos_ativos': [emprestimo.to_dict() for emprestimo in self.emprestimos_ativos.values()]
+        }
+
+        with open('biblioteca_data.json', 'w') as f:
+            json.dump(dados, f, indent=2)
+
+    def carregar_dados(self) -> None:
+        if not os.path.exists('biblioteca_data.json'):
+            return
+
+        with open('biblioteca_data.json', 'r') as f:
+            dados = json.load(f)
+
+        self.livros = {livro['id']: Livro.from_dict(livro) for livro in dados['livros']}
+        self.usuarios = {usuario['id']: Usuario.from_dict(usuario) for usuario in dados['usuarios']}
+        self.emprestimos = {emprestimo['id']: Emprestimo.from_dict(emprestimo) for emprestimo in dados['emprestimos']}
+        self.emprestimos_ativos = {
+            emp['livro_id']: Emprestimo.from_dict(emp) for emp in dados['emprestimos_ativos']
+        }
+
+
+# Interface de linha de comando
+class BibliotecaCLI:
+    def __init__(self):
+        self.biblioteca = Biblioteca()
+
+    def mostrar_menu_principal(self) -> None:
+        while True:
+            print("\n=== SISTEMA DE GERENCIAMENTO DE BIBLIOTECA ===")
+            print("1. Gerenciar Livros")
+            print("2. Gerenciar Usuários")
+            print("3. Gerenciar Empréstimos")
+            print("4. Relatórios")
+            print("0. Sair")
+
+            opcao = input("Escolha uma opção: ")
+
+            if opcao == "1":
+                self.mostrar_menu_livros()
+            elif opcao == "2":
+                self.mostrar_menu_usuarios()
+            elif opcao == "3":
+                self.mostrar_menu_emprestimos()
+            elif opcao == "4":
+                self.mostrar_menu_relatorios()
+            elif opcao == "0":
+                print("Saindo do sistema...")
+                break
+            else:
+                print("Opção inválida!")
+
+    def mostrar_menu_livros(self) -> None:
+        while True:
+            print("\n=== MENU LIVROS ===")
+            print("1. Adicionar Livro")
+            print("2. Remover Livro")
+            print("3. Buscar Livro por ID")
+            print("4. Buscar Livros por Título")
+            print("5. Buscar Livros por Autor")
+            print("6. Buscar Livros por Gênero")
+            print("7. Listar Livros Disponíveis")
+            print("0. Voltar")
+
+            opcao = input("Escolha uma opção: ")
+
+            if opcao == "1":
+                self.adicionar_livro()
+            elif opcao == "2":
+                self.remover_livro()
+            elif opcao == "3":
+                self.buscar_livro_por_id()
+            elif opcao == "4":
+                self.buscar_livros_por_titulo()
+            elif opcao == "5":
+                self.buscar_livros_por_autor()
+            elif opcao == "6":
+                self.buscar_livros_por_genero()
+            elif opcao == "7":
+                self.listar_livros_disponiveis()
+            elif opcao == "0":
+                break
+            else:
+                print("Opção inválida!")
+
+    def adicionar_livro(self) -> None:
+        print("\n--- ADICIONAR LIVRO ---")
+        livro_id = input("ID do livro: ")
+        titulo = input("Título: ")
+        autor = input("Autor: ")
+        ano = int(input("Ano de publicação: "))
+        genero = input("Gênero: ")
+
+        livro = Livro(
+            id=livro_id,
+            titulo=titulo,
+            autor=autor,
+            ano_publicacao=ano,
+            genero=genero
+        )
+
+        try:
+            self.biblioteca.adicionar_livro(livro)
+            print("Livro adicionado com sucesso!")
+        except ValueError as e:
+            print(f"Erro: {e}")
+
+    def remover_livro(self) -> None:
+        print("\n--- REMOVER LIVRO ---")
+        livro_id = input("ID do livro a ser removido: ")
+
+        try:
+            self.biblioteca.remover_livro(livro_id)
+            print("Livro removido com sucesso!")
+        except ValueError as e:
+            print(f"Erro: {e}")
+
+    def buscar_livro_por_id(self) -> None:
+        print("\n--- BUSCAR LIVRO POR ID ---")
+        livro_id = input("ID do livro: ")
+
+        livro = self.biblioteca.buscar_livro_por_id(livro_id)
+        if livro:
+            print("\nDETALHES DO LIVRO:")
+            print(f"ID: {livro.id}")
+            print(f"Título: {livro.titulo}")
+            print(f"Autor: {livro.autor}")
+            print(f"Ano: {livro.ano_publicacao}")
+            print(f"Gênero: {livro.genero}")
+            print(f"Disponível: {'Sim' if livro.disponivel else 'Não'}")
+        else:
+            print("Livro não encontrado!")
+
+    def buscar_livros_por_titulo(self) -> None:
+        print("\n--- BUSCAR LIVROS POR TÍTULO ---")
+        titulo = input("Título (ou parte dele): ")
+
+        livros = self.biblioteca.buscar_livros_por_titulo(titulo)
+        if livros:
+            print("\nLIVROS ENCONTRADOS:")
+            for livro in livros:
+                print(f"{livro.id}: {livro.titulo} - {livro.autor} ({'Disponível' if livro.disponivel else 'Indisponível'})")
+        else:
+            print("Nenhum livro encontrado com este título!")
+
+    def buscar_livros_por_autor(self) -> None:
+        print("\n--- BUSCAR LIVROS POR AUTOR ---")
+        autor = input("Autor (ou parte do nome): ")
+
+        livros = self.biblioteca.buscar_livros_por_autor(autor)
+        if livros:
+            print("\nLIVROS ENCONTRADOS:")
+            for livro in livros:
+                print(f"{livro.id}: {livro.titulo} - {livro.autor} ({'Disponível' if livro.disponivel else 'Indisponível'})")
+        else:
+            print("Nenhum livro encontrado deste autor!")
+
+    def buscar_livros_por_genero(self) -> None:
+        print("\n--- BUSCAR LIVROS POR GÊNERO ---")
+        genero = input("Gênero (ou parte do nome): ")
+
+        livros = self.biblioteca.buscar_livros_por_genero(genero)
+        if livros:
+            print("\nLIVROS ENCONTRADOS:")
+            for livro in livros:
+                print(f"{livro.id}: {livro.titulo} - {livro.autor} ({'Disponível' if livro.disponivel else 'Indisponível'})")
+        else:
+            print("Nenhum livro encontrado neste gênero!")
+
+    def listar_livros_disponiveis(self) -> None:
+        print("\n--- LIVROS DISPONÍVEIS ---")
+        livros = self.biblioteca.listar_livros_disponiveis()
+        if livros:
+            for livro in livros:
+                print(f"{livro.id}: {livro.titulo} - {livro.autor}")
+        else:
+            print("Nenhum livro disponível no momento!")
+
+    def mostrar_menu_usuarios(self) -> None:
+        while True:
+            print("\n=== MENU USUÁRIOS ===")
+            print("1. Adicionar Usuário")
+            print("2. Remover Usuário")
+            print("3. Buscar Usuário por ID")
+            print("4. Buscar Usuários por Nome")
+            print("5. Desativar Usuário")
+            print("6. Ativar Usuário")
+            print("0. Voltar")
+
+            opcao = input("Escolha uma opção: ")
+
+            if opcao == "1":
+                self.adicionar_usuario()
+            elif opcao == "2":
+                self.remover_usuario()
+            elif opcao == "3":
+                self.buscar_usuario_por_id()
+            elif opcao == "4":
+                self.buscar_usuarios_por_nome()
+            elif opcao == "5":
+                self.desativar_usuario()
+            elif opcao == "6":
+                self.ativar_usuario()
+            elif opcao == "0":
+                break
+            else:
+                print("Opção inválida!")
+
+    def adicionar_usuario(self) -> None:
+        print("\n--- ADICIONAR USUÁRIO ---")
+        usuario_id = input("ID do usuário: ")
+        nome = input("Nome: ")
+        email = input("Email: ")
+        telefone = input("Telefone: ")
+
+        usuario = Usuario(
+            id=usuario_id,
+            nome=nome,
+            email=email,
+            telefone=telefone
+        )
+
+        try:
+            self.biblioteca.adicionar_usuario(usuario)
+            print("Usuário adicionado com sucesso!")
+        except ValueError as e:
+            print(f"Erro: {e}")
+
+    def remover_usuario(self) -> None:
+        print("\n--- REMOVER USUÁRIO ---")
+        usuario_id = input("ID do usuário a ser removido: ")
+
+        try:
+            self.biblioteca.remover_usuario(usuario_id)
+            print("Usuário removido com sucesso!")
+        except ValueError as e:
+            print(f"Erro: {e}")
+
+    def buscar_usuario_por_id(self) -> None:
+        print("\n--- BUSCAR USUÁRIO POR ID ---")
+        usuario_id = input("ID do usuário: ")
+
+        usuario = self.biblioteca.buscar_usuario_por_id(usuario_id)
+        if usuario:
+            print("\nDETALHES DO USUÁRIO:")
+            print(f"ID: {usuario.id}")
+            print(f"Nome: {usuario.nome}")
+            print(f"Email: {usuario.email}")
+            print(f"Telefone: {usuario.telefone}")
+            print(f"Status: {'Ativo' if usuario.ativo else 'Inativo'}")
+            print(f"Livros emprestados: {len(usuario.livros_emprestados)}")
+        else:
+            print("Usuário não encontrado!")
+
+    def buscar_usuarios_por_nome(self) -> None:
+        print("\n--- BUSCAR USUÁRIOS POR NOME ---")
+        nome = input("Nome (ou parte dele): ")
+
+        usuarios = self.biblioteca.buscar_usuarios_por_nome(nome)
+        if usuarios:
+            print("\nUSUÁRIOS ENCONTRADOS:")
+            for usuario in usuarios:
+                print(f"{usuario.id}: {usuario.nome} - {usuario.email} ({'Ativo' if usuario.ativo else 'Inativo'})")
+        else:
+            print("Nenhum usuário encontrado com este nome!")
+
+    def desativar_usuario(self) -> None:
+        print("\n--- DESATIVAR USUÁRIO ---")
+        usuario_id = input("ID do usuário a ser desativado: ")
+
+        try:
+            self.biblioteca.desativar_usuario(usuario_id)
+            print("Usuário desativado com sucesso!")
+        except ValueError as e:
+            print(f"Erro: {e}")
+
+    def ativar_usuario(self) -> None:
+        print("\n--- ATIVAR USUÁRIO ---")
+        usuario_id = input("ID do usuário a ser ativado: ")
+
+        try:
+            self.biblioteca.ativar_usuario(usuario_id)
+            print("Usuário ativado com sucesso!")
+        except ValueError as e:
+            print(f"Erro: {e}")
+
+    def mostrar_menu_emprestimos(self) -> None:
+        while True:
+            print("\n=== MENU EMPRÉSTIMOS ===")
+            print("1. Realizar Empréstimo")
+            print("2. Realizar Devolução")
+            print("3. Renovar Empréstimo")
+            print("4. Listar Empréstimos Ativos")
+            print("5. Listar Histórico de Empréstimos")
+            print("6. Listar Empréstimos por Usuário")
+            print("0. Voltar")
+
+            opcao = input("Escolha uma opção: ")
+
+            if opcao == "1":
+                self.realizar_emprestimo()
+            elif opcao == "2":
+                self.realizar_devolucao()
+            elif opcao == "3":
+                self.renovar_emprestimo()
+            elif opcao == "4":
+                self.listar_emprestimos_ativos()
+            elif opcao == "5":
+                self.listar_historico_emprestimos()
+            elif opcao == "6":
+                self.listar_emprestimos_por_usuario()
+            elif opcao == "0":
+                break
+            else:
+                print("Opção inválida!")
+
+    def realizar_emprestimo(self) -> None:
+        print("\n--- REALIZAR EMPRÉSTIMO ---")
+        livro_id = input("ID do livro: ")
+        usuario_id = input("ID do usuário: ")
+
+        try:
+            emprestimo = self.biblioteca.realizar_emprestimo(livro_id, usuario_id)
+            print("\nEMPRÉSTIMO REALIZADO COM SUCESSO!")
+            print(f"ID do empréstimo: {emprestimo.id}")
+            print(f"Data do empréstimo: {emprestimo.data_emprestimo}")
+            print(f"Data prevista para devolução: {emprestimo.data_devolucao_prevista}")
+        except ValueError as e:
+            print(f"Erro: {e}")
+
+    def realizar_devolucao(self) -> None:
+        print("\n--- REALIZAR DEVOLUÇÃO ---")
+        livro_id = input("ID do livro a ser devolvido: ")
+
+        try:
+            emprestimo = self.biblioteca.realizar_devolucao(livro_id)
+            print("\nDEVOLUÇÃO REALIZADA COM SUCESSO!")
+            print(f"ID do empréstimo: {emprestimo.id}")
+            print(f"Data do empréstimo: {emprestimo.data_emprestimo}")
+            print(f"Data prevista para devolução: {emprestimo.data_devolucao_prevista}")
+            print(f"Data real de devolução: {emprestimo.data_devolucao_real}")
+            if emprestimo.multa > 0:
+                print(f"Multa por atraso: R${emprestimo.multa:.2f}")
+        except ValueError as e:
+            print(f"Erro: {e}")
+
+    def renovar_emprestimo(self) -> None:
+        print("\n--- RENOVAR EMPRÉSTIMO ---")
+        livro_id = input("ID do livro a ser renovado: ")
+
+        try:
+            emprestimo = self.biblioteca.renovar_emprestimo(livro_id)
+            print("\nEMPRÉSTIMO RENOVADO COM SUCESSO!")
+            print(f"Nova data de devolução: {emprestimo.data_devolucao_prevista}")
+        except ValueError as e:
+            print(f"Erro: {e}")
+
+    def listar_emprestimos_ativos(self) -> None:
+        print("\n--- EMPRÉSTIMOS ATIVOS ---")
+        emprestimos = self.biblioteca.listar_emprestimos_ativos()
+        if emprestimos:
+            for emp in emprestimos:
+                livro = self.biblioteca.buscar_livro_por_id(emp.livro_id)
+                usuario = self.biblioteca.buscar_usuario_por_id(emp.usuario_id)
+                print(f"\nID: {emp.id}")
+                print(f"Livro: {livro.titulo} (ID: {livro.id})")
+                print(f"Usuário: {usuario.nome} (ID: {usuario.id})")
+                print(f"Data do empréstimo: {emp.data_emprestimo}")
+                print(f"Data prevista para devolução: {emp.data_devolucao_prevista}")
+        else:
+            print("Nenhum empréstimo ativo no momento!")
+
+    def listar_historico_emprestimos(self) -> None:
+        print("\n--- HISTÓRICO DE EMPRÉSTIMOS ---")
+        emprestimos = self.biblioteca.listar_historico_emprestimos()
+        if emprestimos:
+            for emp in emprestimos:
+                livro = self.biblioteca.buscar_livro_por_id(emp.livro_id)
+                usuario = self.biblioteca.buscar_usuario_por_id(emp.usuario_id)
+                print(f"\nID: {emp.id}")
+                print(f"Livro: {livro.titulo} (ID: {livro.id})")
+                print(f"Usuário: {usuario.nome} (ID: {usuario.id})")
+                print(f"Data do empréstimo: {emp.data_emprestimo}")
+                print(f"Data prevista para devolução: {emp.data_devolucao_prevista}")
+                print(f"Data real de devolução: {emp.data_devolucao_real or 'Não devolvido'}")
+                if emp.multa > 0:
+                    print(f"Multa: R${emp.multa:.2f}")
+        else:
+            print("Nenhum empréstimo registrado!")
+
+    def listar_emprestimos_por_usuario(self) -> None:
+        print("\n--- EMPRÉSTIMOS POR USUÁRIO ---")
+        usuario_id = input("ID do usuário: ")
+
+        emprestimos = self.biblioteca.listar_emprestimos_por_usuario(usuario_id)
+        if emprestimos:
+            usuario = self.biblioteca.buscar_usuario_por_id(usuario_id)
+            print(f"\nEMPRÉSTIMOS DO USUÁRIO: {usuario.nome}")
+            for emp in emprestimos:
+                livro = self.biblioteca.buscar_livro_por_id(emp.livro_id)
+                status = "Ativo" if not emp.data_devolucao_real else "Finalizado"
+                print(f"\nID: {emp.id}")
+                print(f"Livro: {livro.titulo} (ID: {livro.id})")
+                print(f"Data do empréstimo: {emp.data_emprestimo}")
+                print(f"Data prevista para devolução: {emp.data_devolucao_prevista}")
+                print(f"Status: {status}")
+        else:
+            print("Nenhum empréstimo encontrado para este usuário!")
+
+    def mostrar_menu_relatorios(self) -> None:
+        while True:
+            print("\n=== MENU RELATÓRIOS ===")
+            print("1. Livros Mais Emprestados")
+            print("2. Usuários Mais Ativos")
+            print("3. Relatório de Atrasos")
+            print("0. Voltar")
+
+            opcao = input("Escolha uma opção: ")
+
+            if opcao == "1":
+                self.gerar_relatorio_livros_mais_emprestados()
+            elif opcao == "2":
+                self.gerar_relatorio_usuarios_mais_ativos()
+            elif opcao == "3":
+                self.gerar_relatorio_atrasos()
+            elif opcao == "0":
+                break
+            else:
+                print("Opção inválida!")
+
+    def gerar_relatorio_livros_mais_emprestados(self) -> None:
+        print("\n--- LIVROS MAIS EMPRESTADOS ---")
+        limite = int(input("Quantos livros deseja listar? (padrão: 10) ") or "10")
+        relatorio = self.biblioteca.gerar_relatorio_livros_mais_emprestados(limite)
+
+        if relatorio:
+            print("\nRANKING DE LIVROS MAIS EMPRESTADOS:")
+            for i, item in enumerate(relatorio, 1):
+                print(f"{i}. {item['livro']} - {item['autor']} ({item['emprestimos']} empréstimos)")
+        else:
+            print("Nenhum empréstimo registrado para gerar relatório!")
+
+    def gerar_relatorio_usuarios_mais_ativos(self) -> None:
+        print("\n--- USUÁRIOS MAIS ATIVOS ---")
+        limite = int(input("Quantos usuários deseja listar? (padrão: 10) ") or "10")
+        relatorio = self.biblioteca.gerar_relatorio_usuarios_mais_ativos(limite)
+
+        if relatorio:
+            print("\nRANKING DE USUÁRIOS MAIS ATIVOS:")
+            for i, item in enumerate(relatorio, 1):
+                print(f"{i}. {item['usuario']} - {item['email']} ({item['emprestimos']} empréstimos)")
+        else:
+            print("Nenhum empréstimo registrado para gerar relatório!")
+
+    def gerar_relatorio_atrasos(self) -> None:
+        print("\n--- RELATÓRIO DE ATRASOS ---")
+        relatorio = self.biblioteca.gerar_relatorio_atrasos()
+
+        print("\nESTATÍSTICAS DE EMPRÉSTIMOS:")
+        print(f"Total de empréstimos ativos: {relatorio['total_emprestimos_ativos']}")
+        print(f"Empréstimos no prazo: {relatorio['no_prazo']}")
+        print(f"Empréstimos atrasados: {relatorio['atrasados']}")
+        print(f"Percentual de atraso: {relatorio['percentual_atraso']:.2f}%")
+
+
+if __name__ == "__main__":
+    cli = BibliotecaCLI()
+    cli.mostrar_menu_principal()
