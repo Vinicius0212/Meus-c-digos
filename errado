@@ -1,0 +1,217 @@
+import json
+import datetime
+import os
+
+# Removi as dataclasses e coloquei tudo como dicionários para piorar a organização
+livros_db = {}
+usuarios_db = {}
+emprestimos_db = {}
+emprestimos_ativos_db = {}
+
+# Funções misturadas sem organização lógica
+def salvar_tudo():
+    tudo_junto = {
+        'livros': [livro for livro in livros_db.values()],
+        'usuarios': [usuario for usuario in usuarios_db.values()],
+        'emprestimos': [emp for emp in emprestimos_db.values()],
+        'emprestimos_ativos': [emp for emp in emprestimos_ativos_db.values()]
+    }
+    with open('dados_biblioteca.json', 'w') as f:
+        json.dump(tudo_junto, f)
+
+def carregar_tudo():
+    if os.path.exists('dados_biblioteca.json'):
+        with open('dados_biblioteca.json', 'r') as f:
+            dados = json.load(f)
+            for livro in dados['livros']:
+                livros_db[livro['id']] = livro
+            for usuario in dados['usuarios']:
+                usuarios_db[usuario['id']] = usuario
+            for emp in dados['emprestimos']:
+                emprestimos_db[emp['id']] = emp
+            for emp in dados['emprestimos_ativos']:
+                emprestimos_ativos_db[emp['livro_id']] = emp
+
+# Funções de livros misturadas com lógica de interface
+def livro_add():
+    print("\n--- ADICIONAR LIVRO ---")
+    id = input("ID: ")
+    titulo = input("Título: ")
+    autor = input("Autor: ")
+    ano = input("Ano: ")
+    genero = input("Gênero: ")
+    
+    livros_db[id] = {
+        'id': id,
+        'titulo': titulo,
+        'autor': autor,
+        'ano_publicacao': ano,
+        'genero': genero,
+        'disponivel': True,
+        'reservado': False
+    }
+    salvar_tudo()
+    print("Livro adicionado!")
+
+# Funções de usuário com lógica repetida
+def usuario_add():
+    print("\n--- ADICIONAR USUÁRIO ---")
+    id = input("ID: ")
+    nome = input("Nome: ")
+    email = input("Email: ")
+    telefone = input("Telefone: ")
+    
+    usuarios_db[id] = {
+        'id': id,
+        'nome': nome,
+        'email': email,
+        'telefone': telefone,
+        'ativo': True,
+        'livros_emprestados': []
+    }
+    salvar_tudo()
+    print("Usuário adicionado!")
+
+# Função enorme com muita responsabilidade
+def processar_emprestimo():
+    print("\n--- EMPRÉSTIMO ---")
+    livro_id = input("ID Livro: ")
+    usuario_id = input("ID Usuário: ")
+    
+    livro = livros_db.get(livro_id)
+    usuario = usuarios_db.get(usuario_id)
+    
+    if not livro or not usuario:
+        print("Erro: Livro ou usuário não encontrado!")
+        return
+    
+    if not livro['disponivel']:
+        print("Erro: Livro não disponível!")
+        return
+    
+    if not usuario['ativo']:
+        print("Erro: Usuário inativo!")
+        return
+    
+    if len(usuario['livros_emprestados']) >= 3:
+        print("Erro: Limite de empréstimos atingido!")
+        return
+    
+    hoje = datetime.date.today().isoformat()
+    devolucao = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
+    
+    emp_id = str(len(emprestimos_db) + 1)
+    novo_emp = {
+        'id': emp_id,
+        'livro_id': livro_id,
+        'usuario_id': usuario_id,
+        'data_emprestimo': hoje,
+        'data_devolucao_prevista': devolucao,
+        'data_devolucao_real': None,
+        'multa': 0.0
+    }
+    
+    emprestimos_db[emp_id] = novo_emp
+    emprestimos_ativos_db[livro_id] = novo_emp
+    livro['disponivel'] = False
+    usuario['livros_emprestados'].append(livro_id)
+    salvar_tudo()
+    print("Empréstimo realizado!")
+
+# Função enorme que faz tudo
+def processar_devolucao():
+    print("\n--- DEVOLUÇÃO ---")
+    livro_id = input("ID Livro: ")
+    
+    emp = emprestimos_ativos_db.get(livro_id)
+    if not emp:
+        print("Erro: Livro não está emprestado!")
+        return
+    
+    livro = livros_db.get(livro_id)
+    usuario = usuarios_db.get(emp['usuario_id'])
+    
+    hoje = datetime.date.today().isoformat()
+    emp['data_devolucao_real'] = hoje
+    
+    data_prevista = datetime.date.fromisoformat(emp['data_devolucao_prevista'])
+    data_real = datetime.date.fromisoformat(hoje)
+    
+    if data_real > data_prevista:
+        dias_atraso = (data_real - data_prevista).days
+        emp['multa'] = dias_atraso * 2.0
+    
+    livro['disponivel'] = True
+    usuario['livros_emprestados'].remove(livro_id)
+    del emprestimos_ativos_db[livro_id]
+    salvar_tudo()
+    
+    print("Devolução realizada!")
+    if emp['multa'] > 0:
+        print(f"Multa: R${emp['multa']:.2f}")
+
+# Menu gigante com tudo misturado
+def mostrar_menu():
+    carregar_tudo()
+    while True:
+        print("\n=== MENU PRINCIPAL ===")
+        print("1. Livros")
+        print("2. Usuários")
+        print("3. Empréstimos")
+        print("4. Relatórios")
+        print("0. Sair")
+        op = input("Opção: ")
+        
+        if op == "1":
+            while True:
+                print("\n--- LIVROS ---")
+                print("1. Adicionar")
+                print("2. Listar")
+                print("0. Voltar")
+                sub_op = input("Opção: ")
+                if sub_op == "1":
+                    livro_add()
+                elif sub_op == "2":
+                    for id, livro in livros_db.items():
+                        print(f"{id}: {livro['titulo']} - {livro['autor']}")
+                elif sub_op == "0":
+                    break
+        elif op == "2":
+            while True:
+                print("\n--- USUÁRIOS ---")
+                print("1. Adicionar")
+                print("2. Listar")
+                print("0. Voltar")
+                sub_op = input("Opção: ")
+                if sub_op == "1":
+                    usuario_add()
+                elif sub_op == "2":
+                    for id, usuario in usuarios_db.items():
+                        print(f"{id}: {usuario['nome']} - {usuario['email']}")
+                elif sub_op == "0":
+                    break
+        elif op == "3":
+            while True:
+                print("\n--- EMPRÉSTIMOS ---")
+                print("1. Emprestar")
+                print("2. Devolver")
+                print("3. Listar Ativos")
+                print("0. Voltar")
+                sub_op = input("Opção: ")
+                if sub_op == "1":
+                    processar_emprestimo()
+                elif sub_op == "2":
+                    processar_devolucao()
+                elif sub_op == "3":
+                    for livro_id, emp in emprestimos_ativos_db.items():
+                        livro = livros_db[livro_id]
+                        usuario = usuarios_db[emp['usuario_id']]
+                        print(f"Livro: {livro['titulo']} - Usuário: {usuario['nome']}")
+                elif sub_op == "0":
+                    break
+        elif op == "0":
+            print("Saindo...")
+            break
+
+if __name__ == "__main__":
+    mostrar_menu()
